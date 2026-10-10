@@ -2,7 +2,7 @@
 
 ###
 
-<p align="left">Hi, I'm currently a sophomore in Computer Science at Georgia Tech seeking a software engineering internship for Summer 2025. I’m passionate about software development, and am especially interested in machine learning/artificial intelligence.</p>
+<p align="left">Hi, I'm currently a junior in Computer Science at Virginia Tech seeking a software engineering internship for Summer 2027 I’m passionate about software development, and am especially interested in machine learning/artificial intelligence.</p>
 
 ###
 
