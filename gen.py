@@ -1,10 +1,10 @@
-"""Builds card.svg: a neofetch-style card with an animated halftone ASCII sunset.
+"""Builds card.svg: a neofetch-style card with an animated halftone ASCII aurora.
 
-Art: "cloud sea" from https://ascii.rest (MIT, github.com/bas3line/ascii), 3 s of frames
-rendered by dump-frames.mjs into cloud-sea.json (dot glyphs plus a palette letter per cell,
-a = PALETTE[0]). Each glyph is drawn as a dot of its size so the art does not depend on
-the viewer's fonts. The scenery plays forward then back, so its loop has no seam; the birds
-are a separate layer that only plays forward. The info text types itself out on load.
+Art: "aurora fjord" from https://ascii.rest (MIT, github.com/bas3line/ascii), 3 s of frames
+rendered by dump-frames.mjs into aurora-fjord.json (dot glyphs plus a palette character per
+cell, '0' = PALETTE[0]). Each glyph is drawn as a dot of its size so the art does not depend
+on the viewer's fonts. The frames play forward then back, so the loop has no seam. The info
+text types itself out on load.
 
 Edit INFO below, then run `python gen.py`.
 """
@@ -32,14 +32,13 @@ INFO = [  # (key, value) | '' for a spacer | '- Title' for a section rule
 ]
 USER, HOST = 'caleb', 'collins'
 
-with open('cloud-sea.json', encoding='utf-8') as f:
+with open('aurora-fjord.json', encoding='utf-8') as f:
     DATA = json.load(f)
-PALETTE, FPS = DATA['palette'], DATA['fps']  # cloud sea's own palette: the card's text and swatches come from it
-FRAMES = [[[(g, ord(c) - 97) for g, c in zip(gs, cs)] for gs, cs in zip(fr['glyphs'], fr['colors'])] for fr in DATA['frames']]
-BIRDS = [{(y, x): (g, ord(c) - 97) for y, x, g, c in fr} for fr in DATA['birds']]  # only the cells the birds change
-BG, BORDER, KEY, DOTS, TEXT = PALETTE[0], PALETTE[3], PALETTE[17], PALETTE[5], PALETTE[24]
+PALETTE, FPS = DATA['palette'], DATA['fps']  # the piece's own palette: the card's text and swatches come from it
+FRAMES = [[[(g, ord(c) - 48) for g, c in zip(gs, cs)] for gs, cs in zip(fr['glyphs'], fr['colors'])] for fr in DATA['frames']]
+BG, BORDER, KEY, DOTS, TEXT = DATA['ground'], PALETTE[2], PALETTE[9], PALETTE[4], PALETTE[30]
 RADIUS = {'·': 0.17, '•': 0.29, '●': 0.41}  # dot radius per glyph, in cells
-CELL = 4.6  # px per cell
+CELL = 4  # px per cell
 CH, CW_ = len(FRAMES[0]), len(FRAMES[0][0])
 
 TYPE_LINE, TYPE_START = 0.25, 0.4  # s to type one info line, s before the first
@@ -89,11 +88,11 @@ def dots(cells):
     return '\n'.join(path(f'g{"·•●".index(g)} c{ci}', pts) for (g, ci), pts in sorted(groups.items()))
 
 
-def flipbook(cls, seq, keys):
-    """CSS that shows the group .{cls}{k} (for k in keys) only in the slots of seq that hold k."""
+def flipbook(cls, seq):
+    """CSS that shows the frame group .{cls}{k} only in the slots of seq that hold k."""
     slot = 100 / len(seq)
     css = [f'.{cls} {{visibility: hidden; animation: {len(seq) / FPS:g}s step-end infinite;}}']
-    for k in keys:
+    for k in sorted(set(seq)):
         stops = [f'{s * slot:.3f}%{{visibility:visible}} {(s + 1) * slot:.3f}%{{visibility:hidden}}' for s, v in enumerate(seq) if v == k]
         css.append(f'.{cls}{k} {{animation-name: {cls}{k};}} @keyframes {cls}{k} {{0%{{visibility:hidden}} {" ".join(stops)}}}')
     return css
@@ -104,7 +103,6 @@ def svg():
     static = {k: v for k, v in grids[0].items() if all(g.get(k) == v for g in grids)}  # drawn once, under every frame
     n = len(FRAMES)
     seq = list(range(n)) + list(range(n - 2, 0, -1))  # forward then back: the loop has no seam
-    birds = [k for k, b in enumerate(BIRDS) if b]  # empty frames need no group
 
     css = [
         'text, tspan {white-space: pre;}',
@@ -112,16 +110,14 @@ def svg():
         '.art {fill: none; stroke-linecap: round;}',
         *(f'.g{i} {{stroke-width: {r * 2:g};}}' for i, r in enumerate(RADIUS.values())),
         *(f'.c{i} {{stroke: {c};}}' for i, c in enumerate(PALETTE)),
-        f'.k {{stroke: {BG}; stroke-width: {max(RADIUS.values()) * 2 + 0.02:g};}}',  # blanks the scenery dot under a bird
-        *flipbook('f', seq, range(n)),
+        *flipbook('f', seq),
         '.f0 {visibility: visible;}',
-        *flipbook('b', range(len(BIRDS)), birds),
         # typing: a background-coloured cover, cursor on its edge, slides off each line a character at a time
         f'.ty {{animation: type {TYPE_LINE:g}s steps({COLS}) both;}} @keyframes type {{to {{transform: translateX({COLS}ch);}}}}',
         f'.cu {{fill: {KEY}; visibility: hidden; animation: cursor {TYPE_LINE:g}s;}} @keyframes cursor {{from, to {{visibility: visible;}}}}',
         '.sw {animation: pop 0s both;} @keyframes pop {from {visibility: hidden;}}',
         # last, so it overrides the rules above
-        '@media (prefers-reduced-motion: reduce) {.art .f, .art .b, .sw {animation: none;} .ty {display: none;}}',
+        '@media (prefers-reduced-motion: reduce) {.art .f, .sw {animation: none;} .ty {display: none;}}',
     ]
 
     swatches = [PALETTE[ci] for ci in sorted(ci for ci, _ in Counter(ci for _, ci in grids[0].values()).most_common(8))]
@@ -144,8 +140,6 @@ def svg():
     ]
     for k, g in enumerate(grids):
         out += [f'<g class="f f{k}">', dots({c: v for c, v in g.items() if c not in static}), '</g>']
-    for k in birds:
-        out += [f'<g class="b b{k}">', path('k', [(x, y) for y, x in BIRDS[k]]), dots(BIRDS[k]), '</g>']
     out += ['</g></g></g>', '<text>']
     out += [f'<tspan x="{TX:.1f}" y="{top + y * LINE}">{line}</tspan>' for y, line in enumerate(lines) if line]
     out.append('</text>')
@@ -166,10 +160,8 @@ def svg():
 
 
 if __name__ == '__main__':
-    assert len(PALETTE) <= 26, 'palette letters run past z'
     assert all(len(fr) == CH and all(len(r) == CW_ for r in fr) for fr in FRAMES), 'frames differ in size'
-    glyphs = {g for fr in FRAMES for row in fr for g, _ in row} | {g for b in BIRDS for g, _ in b.values()}
-    assert glyphs <= set(RADIUS) | {' '}, 'unknown glyph in cloud-sea.json'
-    assert not BIRDS[0] and not BIRDS[-1], 'birds at a loop edge: their loop would jump'
+    assert all(0 <= ci < len(PALETTE) for fr in FRAMES for row in fr for _, ci in row), 'colour outside the palette'
+    assert {g for fr in FRAMES for row in fr for g, _ in row} <= set(RADIUS) | {' '}, 'unknown glyph in aurora-fjord.json'
     with open('card.svg', 'w', encoding='utf-8', newline='\n') as f:
         f.write(svg())
