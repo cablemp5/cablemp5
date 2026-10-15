@@ -3,7 +3,8 @@
 Art: "cloud sea" from https://ascii.rest (MIT, github.com/bas3line/ascii), 3 s of frames
 rendered by dump-frames.mjs into cloud-sea.json (dot glyphs plus a palette letter per cell,
 a = PALETTE[0]). Each glyph is drawn as a dot of its size so the art does not depend on
-the viewer's fonts. The frames play forward then back, so the loop has no seam.
+the viewer's fonts. The scenery plays forward then back, so its loop has no seam; the birds
+are a separate layer that only plays forward. The info text types itself out on load.
 
 Edit INFO below, then run `python gen.py`.
 """
@@ -35,10 +36,13 @@ with open('cloud-sea.json', encoding='utf-8') as f:
     DATA = json.load(f)
 PALETTE, FPS = DATA['palette'], DATA['fps']  # cloud sea's own palette: the card's text and swatches come from it
 FRAMES = [[[(g, ord(c) - 97) for g, c in zip(gs, cs)] for gs, cs in zip(fr['glyphs'], fr['colors'])] for fr in DATA['frames']]
+BIRDS = [{(y, x): (g, ord(c) - 97) for y, x, g, c in fr} for fr in DATA['birds']]  # only the cells the birds change
 BG, BORDER, KEY, DOTS, TEXT = PALETTE[0], PALETTE[3], PALETTE[17], PALETTE[5], PALETTE[24]
 RADIUS = {'·': 0.17, '•': 0.29, '●': 0.41}  # dot radius per glyph, in cells
 CELL = 4.6  # px per cell
 CH, CW_ = len(FRAMES[0]), len(FRAMES[0][0])
+
+TYPE_LINE, TYPE_START = 0.25, 0.4  # s to type one info line, s before the first
 
 FONT, LINE, CW = 14, 18, 8.4  # px; CW is an estimate of monospace advance (0.6em)
 PAD, GAP, COLS = 24, 28, 54   # COLS = width of the info column in characters
@@ -67,19 +71,32 @@ def info_lines():
             yield span('dots', '. ') + key + span('dots', ': ' + '.' * dots + ' ') + span('val', v)
 
 
+def path(cls, pts):
+    """A zero-length round-capped stroke per point: each m..h0 is a dot."""
+    d, px, py = [], 0, 0
+    for x, y in pts:  # relative moves keep the path data short
+        d.append(f'm{x - px} {y - py}h0' if d else f'M{x} {y}h0')
+        px, py = x, y
+    return f'<path class="{cls}" d="{"".join(d)}"/>'
+
+
 def dots(cells):
-    """Paths of zero-length round-capped strokes, one per (glyph, colour); each m..h0 is a dot."""
+    """One path per (glyph, colour)."""
     groups = {}
     for (y, x), (g, ci) in sorted(cells.items()):
-        groups.setdefault((g, ci), []).append((x, y))
-    out = []
-    for (g, ci), pts in sorted(groups.items()):
-        d, px, py = [], 0, 0
-        for x, y in pts:  # relative moves keep the path data short
-            d.append(f'm{x - px} {y - py}h0' if d else f'M{x} {y}h0')
-            px, py = x, y
-        out.append(f'<path class="g{"·•●".index(g)} c{ci}" d="{"".join(d)}"/>')
-    return '\n'.join(out)
+        if g != ' ':
+            groups.setdefault((g, ci), []).append((x, y))
+    return '\n'.join(path(f'g{"·•●".index(g)} c{ci}', pts) for (g, ci), pts in sorted(groups.items()))
+
+
+def flipbook(cls, seq, keys):
+    """CSS that shows the group .{cls}{k} (for k in keys) only in the slots of seq that hold k."""
+    slot = 100 / len(seq)
+    css = [f'.{cls} {{visibility: hidden; animation: {len(seq) / FPS:g}s step-end infinite;}}']
+    for k in keys:
+        stops = [f'{s * slot:.3f}%{{visibility:visible}} {(s + 1) * slot:.3f}%{{visibility:hidden}}' for s, v in enumerate(seq) if v == k]
+        css.append(f'.{cls}{k} {{animation-name: {cls}{k};}} @keyframes {cls}{k} {{0%{{visibility:hidden}} {" ".join(stops)}}}')
+    return css
 
 
 def svg():
@@ -87,7 +104,7 @@ def svg():
     static = {k: v for k, v in grids[0].items() if all(g.get(k) == v for g in grids)}  # drawn once, under every frame
     n = len(FRAMES)
     seq = list(range(n)) + list(range(n - 2, 0, -1))  # forward then back: the loop has no seam
-    slot = 100 / len(seq)
+    birds = [k for k, b in enumerate(BIRDS) if b]  # empty frames need no group
 
     css = [
         'text, tspan {white-space: pre;}',
@@ -95,12 +112,17 @@ def svg():
         '.art {fill: none; stroke-linecap: round;}',
         *(f'.g{i} {{stroke-width: {r * 2:g};}}' for i, r in enumerate(RADIUS.values())),
         *(f'.c{i} {{stroke: {c};}}' for i, c in enumerate(PALETTE)),
-        f'.f {{visibility: hidden; animation: {len(seq) / FPS:g}s step-end infinite;}} .f0 {{visibility: visible;}}',
+        f'.k {{stroke: {BG}; stroke-width: {max(RADIUS.values()) * 2 + 0.02:g};}}',  # blanks the scenery dot under a bird
+        *flipbook('f', seq, range(n)),
+        '.f0 {visibility: visible;}',
+        *flipbook('b', range(len(BIRDS)), birds),
+        # typing: a background-coloured cover, cursor on its edge, slides off each line a character at a time
+        f'.ty {{animation: type {TYPE_LINE:g}s steps({COLS}) both;}} @keyframes type {{to {{transform: translateX({COLS}ch);}}}}',
+        f'.cu {{fill: {KEY}; visibility: hidden; animation: cursor {TYPE_LINE:g}s;}} @keyframes cursor {{from, to {{visibility: visible;}}}}',
+        '.sw {animation: pop 0s both;} @keyframes pop {from {visibility: hidden;}}',
+        # last, so it overrides the rules above
+        '@media (prefers-reduced-motion: reduce) {.art .f, .art .b, .sw {animation: none;} .ty {display: none;}}',
     ]
-    for k in range(n):  # frame k is visible only in the slots where seq shows it
-        stops = [f'{s * slot:.3f}%{{visibility:visible}} {(s + 1) * slot:.3f}%{{visibility:hidden}}' for s, v in enumerate(seq) if v == k]
-        css.append(f'.f{k} {{animation-name: a{k};}} @keyframes a{k} {{0%{{visibility:hidden}} {" ".join(stops)}}}')
-    css.append('@media (prefers-reduced-motion: reduce) {.art .f {animation: none;}}')  # after the rules it overrides
 
     swatches = [PALETTE[ci] for ci in sorted(ci for ci, _ in Counter(ci for _, ci in grids[0].values()).most_common(8))]
     lines = list(info_lines())
@@ -122,11 +144,23 @@ def svg():
     ]
     for k, g in enumerate(grids):
         out += [f'<g class="f f{k}">', dots({c: v for c, v in g.items() if c not in static}), '</g>']
+    for k in birds:
+        out += [f'<g class="b b{k}">', path('k', [(x, y) for y, x in BIRDS[k]]), dots(BIRDS[k]), '</g>']
     out += ['</g></g></g>', '<text>']
     out += [f'<tspan x="{TX:.1f}" y="{top + y * LINE}">{line}</tspan>' for y, line in enumerate(lines) if line]
     out.append('</text>')
+    delay = TYPE_START
+    for y, line in enumerate(lines):
+        if line:
+            style = f'style="animation-delay: {delay:.2f}s"'
+            out += [f'<g class="ty" {style}>',
+                    f'<rect x="{TX:.1f}" y="{top + y * LINE - 13}" width="{WIDTH - TX:.1f}" height="{LINE}" fill="{BG}"/>',
+                    f'<rect class="cu" {style} x="{TX:.1f}" y="{top + y * LINE - 12}" width=".6em" height="16"/>', '</g>']
+        delay += TYPE_LINE if line else TYPE_LINE / 2  # a spacer is a short pause
     py = top + len(lines) * LINE + 2
+    out.append(f'<g class="sw" style="animation-delay: {delay:.2f}s">')
     out += [f'<rect x="{TX + i * 30:.1f}" y="{py}" width="22" height="14" rx="2" fill="{c}"/>' for i, c in enumerate(swatches)]
+    out.append('</g>')
     out += [f'<rect x=".5" y=".5" width="{WIDTH - 1}" height="{HEIGHT - 1}" rx="12" fill="none" stroke="{BORDER}"/>', '</svg>', '']
     return '\n'.join(out)
 
@@ -134,6 +168,8 @@ def svg():
 if __name__ == '__main__':
     assert len(PALETTE) <= 26, 'palette letters run past z'
     assert all(len(fr) == CH and all(len(r) == CW_ for r in fr) for fr in FRAMES), 'frames differ in size'
-    assert {g for fr in FRAMES for row in fr for g, _ in row} <= set(RADIUS) | {' '}, 'unknown glyph in cloud-sea.json'
+    glyphs = {g for fr in FRAMES for row in fr for g, _ in row} | {g for b in BIRDS for g, _ in b.values()}
+    assert glyphs <= set(RADIUS) | {' '}, 'unknown glyph in cloud-sea.json'
+    assert not BIRDS[0] and not BIRDS[-1], 'birds at a loop edge: their loop would jump'
     with open('card.svg', 'w', encoding='utf-8', newline='\n') as f:
         f.write(svg())
