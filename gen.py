@@ -15,7 +15,6 @@ from xml.sax.saxutils import escape
 INFO = [  # (key, value) | '' for a spacer | '- Title' for a section rule
     ('School', 'Virginia Tech'),
     ('Major', 'Computer Science, junior'),
-    ('Location', 'Blacksburg, VA'),
     ('Seeking', 'SWE internship, summer 2027'),
     '',
     ('Languages', 'Python, Java, TypeScript, JavaScript'),
